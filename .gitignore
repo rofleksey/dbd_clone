@@ -1,0 +1,26 @@
+# Dependencies
+frontend/node_modules/
+frontend/dist/
+
+# Go binaries
+master-server/master-server
+master-server/master-server.exe
+game-server/game-server
+game-server/game-server.exe
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker volumes
+pgdata/
+
+# Env files
+.env
+.env.local

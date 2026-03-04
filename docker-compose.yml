@@ -1,0 +1,59 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: dbd_clone
+      POSTGRES_USER: dbd
+      POSTGRES_PASSWORD: dbd_secret_password
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dbd -d dbd_clone"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  master-server:
+    build:
+      context: ./master-server
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_URL: "postgres://dbd:dbd_secret_password@postgres:5432/dbd_clone?sslmode=disable"
+      JWT_SECRET: "your-jwt-secret-change-in-production"
+      DOCKER_HOST: "tcp://host.docker.internal:2375"
+      GAME_SERVER_IMAGE: "dbd-game-server"
+      GAME_PORT_MIN: "10000"
+      GAME_PORT_MAX: "10100"
+      MASTER_PORT: "8080"
+      HOST_IP: "host.docker.internal"
+      GAME_LOG_DIR: "gamelogs"
+    volumes:
+      - //var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:80"
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - master-server
+      - frontend
+
+volumes:
+  pgdata:
+  gamelogs:

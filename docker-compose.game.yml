@@ -1,0 +1,16 @@
+version: '3.8'
+
+# Template for game server containers spawned by master server
+# Not used directly - master server creates containers via Docker API
+services:
+  game-server:
+    image: dbd-game-server
+    environment:
+      GAME_ID: "${GAME_ID}"
+      GAME_PORT: "${GAME_PORT}"
+      MASTER_URL: "http://host.docker.internal:8080"
+      MAX_PLAYERS: "${MAX_PLAYERS}"
+      KILLER_ID: "${KILLER_ID}"
+    ports:
+      - "${GAME_PORT}:${GAME_PORT}"
+    network_mode: "bridge"
