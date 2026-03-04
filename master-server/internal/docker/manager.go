@@ -7,8 +7,10 @@ import (
 	"os"
 	"strconv"
 	"sync"
+	"strings"
 
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
@@ -38,7 +40,7 @@ func NewManager() *Manager {
 		log.Printf("Game server containers will not be available")
 	}
 
-	return &Manager{
+	m := &Manager{
 		cli:           cli,
 		gameImage:     getEnvDefault("GAME_SERVER_IMAGE", "dbd-game-server"),
 		portMin:       portMin,
@@ -48,8 +50,12 @@ func NewManager() *Manager {
 		masterPort:    getEnvDefault("MASTER_PORT", "8080"),
 		containers:    make(map[int]string),
 		ports:         make(map[int]int),
-		logVolumeName: getEnvDefault("GAME_LOG_DIR", "gamelogs"),
+		logVolumeName: getEnvDefault("GAME_LOG_DIR", "dbd-logs-data"),
 	}
+	if cli != nil {
+		m.stopAllGameContainers(context.Background())
+	}
+	return m
 }
 
 func getEnvDefault(key, defaultVal string) string {
@@ -57,6 +63,32 @@ func getEnvDefault(key, defaultVal string) string {
 		return val
 	}
 	return defaultVal
+}
+
+// stopAllGameContainers stops and removes all existing dbd-game-* containers on master server launch.
+// This avoids "port already allocated" and ensures a clean state after master restarts.
+func (m *Manager) stopAllGameContainers(ctx context.Context) {
+	listOpts := container.ListOptions{
+		All:     true,
+		Filters: filters.NewArgs(filters.Arg("name", "dbd-game")),
+	}
+	containers, err := m.cli.ContainerList(ctx, listOpts)
+	if err != nil {
+		log.Printf("WARNING: could not list containers to stop: %v", err)
+		return
+	}
+	timeout := 5
+	for _, c := range containers {
+		names := strings.Join(c.Names, ", ")
+		if err := m.cli.ContainerStop(ctx, c.ID, container.StopOptions{Timeout: &timeout}); err != nil {
+			log.Printf("WARNING: failed to stop container %s (%s): %v", c.ID[:12], names, err)
+		} else {
+			log.Printf("Stopped game container %s (%s)", c.ID[:12], names)
+		}
+		if err := m.cli.ContainerRemove(ctx, c.ID, container.RemoveOptions{Force: true}); err != nil {
+			log.Printf("WARNING: failed to remove container %s (%s): %v", c.ID[:12], names, err)
+		}
+	}
 }
 
 func (m *Manager) allocatePort() (int, error) {

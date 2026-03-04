@@ -49,41 +49,32 @@ export function createGeneratorModel(): THREE.Group {
 export function createPalletModel(): THREE.Group {
   const group = new THREE.Group()
 
-  // Pallet is a wooden flat structure, ~2.5m wide, 0.3m thick boards
-  // Standing upright when not dropped
+  // DBD-style pallet: two vertical supports with horizontal planks between. ~2.2m wide, ~1m tall when standing.
 
-  // Main boards (standing up = vertical)
-  const board1 = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.08, 0.12), Materials.wood)
-  board1.position.set(0, 0.5, -0.1)
-  group.add(board1)
-
-  const board2 = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.08, 0.12), Materials.wood)
-  board2.position.set(0, 0.5, 0.1)
-  group.add(board2)
-
-  const board3 = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.08, 0.12), Materials.woodDark)
-  board3.position.set(0, 0.58, 0)
-  group.add(board3)
-
-  // Cross supports
-  const support1 = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.32), Materials.woodDark)
-  support1.position.set(-0.8, 0.5, 0)
-  group.add(support1)
-
-  const support2 = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.32), Materials.woodDark)
-  support2.position.set(0.8, 0.5, 0)
-  group.add(support2)
-
-  // Upright posts (when standing)
-  const postL = new THREE.Mesh(new THREE.BoxGeometry(0.10, 1.0, 0.10), Materials.woodDark)
-  postL.position.set(-1.0, 0.5, 0)
+  // Vertical posts (left and right)
+  const postL = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.0, 0.12), Materials.woodDark)
+  postL.position.set(-1.04, 0.5, 0)
   postL.name = 'postL'
   group.add(postL)
 
-  const postR = new THREE.Mesh(new THREE.BoxGeometry(0.10, 1.0, 0.10), Materials.woodDark)
-  postR.position.set(1.0, 0.5, 0)
+  const postR = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.0, 0.12), Materials.woodDark)
+  postR.position.set(1.04, 0.5, 0)
   postR.name = 'postR'
   group.add(postR)
+
+  // Horizontal planks (width 2.0 in X, thin in Z)
+  const plankW = 2.08
+  const plankH = 0.06
+  const plankD = 0.1
+  const heights = [0.15, 0.42, 0.68, 0.92]
+  heights.forEach((y, i) => {
+    const plank = new THREE.Mesh(
+      new THREE.BoxGeometry(plankW, plankH, plankD),
+      i % 2 === 0 ? Materials.wood : Materials.woodDark
+    )
+    plank.position.set(0, y, 0)
+    group.add(plank)
+  })
 
   group.traverse((c) => { if (c instanceof THREE.Mesh) { c.castShadow = true; c.receiveShadow = true } })
   return group
@@ -92,32 +83,32 @@ export function createPalletModel(): THREE.Group {
 export function createHookModel(): THREE.Group {
   const group = new THREE.Group()
 
-  // Wooden pole
-  const pole = new THREE.Mesh(new THREE.BoxGeometry(0.15, 3.2, 0.15), Materials.woodDark)
-  pole.position.set(0, 1.6, 0)
+  // Wooden pole (smaller hook overall)
+  const pole = new THREE.Mesh(new THREE.BoxGeometry(0.12, 2.4, 0.12), Materials.woodDark)
+  pole.position.set(0, 1.2, 0)
   group.add(pole)
 
   // Cross beam
-  const beam = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.1, 0.1), Materials.woodDark)
-  beam.position.set(0.3, 3.0, 0)
+  const beam = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.08, 0.08), Materials.woodDark)
+  beam.position.set(0.2, 2.2, 0)
   group.add(beam)
 
   // Hook (metal)
-  const hookBase = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.3, 0.06), Materials.metal)
-  hookBase.position.set(0.6, 2.75, 0)
+  const hookBase = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.2, 0.05), Materials.metal)
+  hookBase.position.set(0.4, 2.05, 0)
   group.add(hookBase)
 
-  const hookCurve = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.06, 0.06), Materials.metal)
-  hookCurve.position.set(0.55, 2.58, 0)
+  const hookCurve = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.05, 0.05), Materials.metal)
+  hookCurve.position.set(0.36, 1.92, 0)
   group.add(hookCurve)
 
-  const hookPoint = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.15, 0.06), Materials.metal)
-  hookPoint.position.set(0.48, 2.52, 0)
+  const hookPoint = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.1, 0.05), Materials.metal)
+  hookPoint.position.set(0.32, 1.86, 0)
   group.add(hookPoint)
 
   // Entity indicator (red glow)
-  const indicator = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.08), Materials.redLight)
-  indicator.position.set(0, 3.3, 0)
+  const indicator = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.06), Materials.redLight)
+  indicator.position.set(0, 2.4, 0)
   indicator.name = 'indicator'
   group.add(indicator)
 

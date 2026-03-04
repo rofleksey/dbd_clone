@@ -27,6 +27,7 @@ const (
 	ActionCarrying       = "carrying"
 	ActionBeingCarried   = "being_carried"
 	ActionHooked         = "hooked"
+	ActionDying          = "dying"
 	ActionTrapped        = "trapped"
 	ActionStunned        = "stunned"
 	ActionAttacking      = "attacking"
@@ -34,14 +35,14 @@ const (
 	ActionPickingUpTrap  = "picking_up_trap"
 	ActionBreakingPallet = "breaking_pallet"
 
-	// Movement speeds (units per second)
-	SurvivorWalkSpeed   = 2.26
-	SurvivorRunSpeed    = 4.0
-	SurvivorCrouchSpeed = 1.13
-	KillerBaseSpeed     = 4.6
+	// Movement speeds (units per second) — 3x multiplier, then 1.5x
+	SurvivorWalkSpeed   = 36.0  // 24 * 1.5
+	SurvivorRunSpeed    = 63.0  // 42 * 1.5
+	SurvivorCrouchSpeed = 18.0  // 12 * 1.5
+	KillerBaseSpeed     = 72.0  // 48 * 1.5
 
 	// Interaction distances
-	InteractDistance = 2.0
+	InteractDistance = 1.6
 	AttackRange      = 2.5
 	AttackWidth      = 1.5
 

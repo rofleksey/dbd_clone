@@ -18,12 +18,13 @@ import (
 )
 
 const (
-	TickRate               = 30
-	TickDuration           = time.Second / TickRate
-	GameTimeout            = 15 * 60 // 15 minutes in seconds
-	GensRequired           = 5
-	TotalGens              = 7
-	ProgressReportInterval = 5 * time.Second
+	TickRate                   = 30
+	TickDuration               = time.Second / TickRate
+	GameTimeout                = 15 * 60 // 15 minutes in seconds
+	GensRequired               = 5
+	TotalGens                  = 7
+	ProgressReportInterval     = 5 * time.Second
+	HookSurvivorHeightOffset   = 1.35 // World Y offset from hook base so survivor appears on the hook
 )
 
 type Game struct {
@@ -329,6 +330,7 @@ func (g *Game) handleRepair(p *player.Player, targetID string) {
 	p.ActionState = player.ActionRepairing
 	p.ActionTarget = targetID
 	p.MoveState = player.MoveIdle
+	p.RotY = math.Atan2(gen.Pos.X-p.PosX, gen.Pos.Z-p.PosZ)
 	gen.RepairerIDs[p.UserID] = true
 	gen.BeingRepaired = true
 	gen.Regressing = false
@@ -378,35 +380,13 @@ func (g *Game) handleUnhook(p *player.Player, targetHookID string) {
 }
 
 func (g *Game) handleSelfUnhook(p *player.Player) {
-	if p.ActionState != player.ActionHooked || p.HookStage >= 2 {
-		return
-	}
-
-	p.HookAttempts++
-	if rand.Float64() < player.SelfUnhookChance {
-		// Success!
-		g.unhookPlayer(p)
-	}
-	// Each attempt speeds up hook timer slightly
+	// Survivors cannot self-unhook
+	return
 }
 
 func (g *Game) handleEscapeTrap(p *player.Player) {
-	if p.ActionState != player.ActionTrapped {
-		return
-	}
-
-	p.TrapAttempts++
-	if rand.Float64() < player.TrapEscapeChance {
-		// Escaped!
-		trap := g.findTrap(p.TrappedInID)
-		if trap != nil {
-			trap.Triggered = false
-			trap.Placed = false
-		}
-		p.ActionState = player.ActionNone
-		p.TrappedInID = ""
-		p.TrapAttempts = 0
-	}
+	// Survivors cannot self-untrap
+	return
 }
 
 func (g *Game) handleOpenGate(p *player.Player, targetID string) {
@@ -419,7 +399,7 @@ func (g *Game) handleOpenGate(p *player.Player, targetID string) {
 		return
 	}
 
-	if !gamemap.IsNear(p.PosX, p.PosZ, gate.Pos.X, gate.Pos.Z, player.InteractDistance+1) {
+	if !gamemap.IsNear(p.PosX, p.PosZ, gate.Pos.X, gate.Pos.Z, player.InteractDistance+0.6) {
 		return
 	}
 
@@ -533,7 +513,7 @@ func (g *Game) handleAttack(p *player.Player) {
 
 				if target.Health == player.HealthDying {
 					target.MoveState = player.MoveIdle
-					target.ActionState = player.ActionNone
+					target.ActionState = player.ActionDying
 					target.DyingTimer = player.DyingBleedoutTime
 				}
 
@@ -554,10 +534,11 @@ func (g *Game) handlePickupSurvivor(p *player.Player) {
 		return
 	}
 
-	// Find nearest dying survivor
+	// Find nearest dying survivor (not hooked)
 	for _, target := range g.Players {
 		if target.Role == player.RoleSurvivor && target.Health == player.HealthDying &&
-			target.IsAlive && target.ActionState != player.ActionBeingCarried {
+			target.IsAlive && target.ActionState != player.ActionBeingCarried &&
+			target.ActionState != player.ActionHooked {
 
 			if gamemap.IsNear(p.PosX, p.PosZ, target.PosX, target.PosZ, player.InteractDistance) {
 				p.CarryingPlayerID = target.UserID
@@ -625,6 +606,7 @@ func (g *Game) handleHookSurvivor(p *player.Player, hookID string) {
 	} else {
 		carried.HookTimer = player.HookStage1Time
 		carried.PosX = hook.Pos.X
+		carried.PosY = hook.Pos.Y + HookSurvivorHeightOffset
 		carried.PosZ = hook.Pos.Z
 	}
 
@@ -634,6 +616,9 @@ func (g *Game) handleHookSurvivor(p *player.Player, hookID string) {
 
 func (g *Game) handlePlaceTrap(p *player.Player) {
 	if p.Role != player.RoleKiller || p.TrapCount <= 0 {
+		return
+	}
+	if p.ActionState == player.ActionPlacingTrap {
 		return
 	}
 
@@ -878,6 +863,7 @@ func (g *Game) update() {
 
 		// Dying timer (bleedout)
 		if p.Health == player.HealthDying && p.ActionState != player.ActionBeingCarried && p.ActionState != player.ActionHooked {
+			p.ActionState = player.ActionDying
 			p.DyingTimer -= dt
 			if p.DyingTimer <= 0 {
 				p.IsAlive = false
@@ -1137,6 +1123,7 @@ func (g *Game) buildState() protocol.GameState {
 			Health:         p.Health,
 			MoveState:      p.MoveState,
 			ActionState:    p.ActionState,
+			ActionTarget:   p.ActionTarget,
 			ActionProgress: p.ActionProgress,
 			CarryingID:     p.CarryingPlayerID,
 			HookedOn:       p.HookedOnID,

@@ -27,15 +27,12 @@
         </div>
       </div>
 
-      <!-- Self-unhook / escape trap prompt -->
+      <!-- Hooked / trapped status (no self-unhook or self-untrap) -->
       <div class="special-prompt" v-if="myPlayer && myPlayer.action_state === 'hooked'">
         <p>HOOKED - Stage {{ myPlayer.hook_stage }}</p>
-        <p v-if="myPlayer.hook_stage < 2">Press SPACE to attempt self-unhook (10% chance)</p>
-        <p v-else>Struggle! Press SPACE rapidly!</p>
       </div>
       <div class="special-prompt" v-if="myPlayer && myPlayer.action_state === 'trapped'">
-        <p>TRAPPED!</p>
-        <p>Press SPACE to attempt escape (25% chance)</p>
+        <p>TRAPPED - Wait for help</p>
       </div>
 
       <!-- Killer HUD extras -->
@@ -55,7 +52,7 @@
         </div>
         <div class="survivor-controls">
           <span>WASD: Move</span>
-          <span>Shift: Walk</span>
+          <span>Shift: Run</span>
           <span>Ctrl: Crouch</span>
           <span>Space: Vault/Pallet</span>
           <span>E: Interact</span>
@@ -124,11 +121,12 @@
         <p>{{ loadingText }}</p>
       </div>
     </div>
+
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useGameStore } from '../stores/game'
 import { useAuthStore } from '../stores/auth'

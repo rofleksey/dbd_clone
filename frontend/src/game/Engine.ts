@@ -63,6 +63,14 @@ export class GameEngine {
   private lastSendTime: number = 0
   private lastPingTime: number = 0
 
+  // Smooth display position for local POV: lerps toward server position (server remains source of truth)
+  private smoothDisplayPos: { x: number; y: number; z: number; rotY: number } | null = null
+  private static readonly SMOOTH_POS_K = 20
+  private static readonly SMOOTH_ROT_K = 24
+  private cameraRaycaster = new THREE.Raycaster()
+  private cameraRayOrigin = new THREE.Vector3()
+  private cameraRayDir = new THREE.Vector3()
+
   // Interaction
   private nearbyInteractable: { type: string; id: string; name: string } | null = null
 
@@ -124,12 +132,12 @@ export class GameEngine {
   }
 
   private setupLighting() {
-    // Ambient - very dim for horror atmosphere
-    const ambient = new THREE.AmbientLight(0x222233, 0.3)
+    // Ambient - brighter for visibility while keeping night feel
+    const ambient = new THREE.AmbientLight(0x445566, 1.05)
     this.scene.add(ambient)
 
-    // Moonlight - dim directional from above
-    const moon = new THREE.DirectionalLight(0x4466aa, 0.4)
+    // Moonlight - directional from above
+    const moon = new THREE.DirectionalLight(0x5588bb, 1.0)
     moon.position.set(30, 50, 30)
     moon.castShadow = true
     moon.shadow.mapSize.width = 2048
@@ -142,26 +150,28 @@ export class GameEngine {
     moon.shadow.camera.bottom = -50
     this.scene.add(moon)
 
-    // Hemisphere for subtle sky/ground color
-    const hemi = new THREE.HemisphereLight(0x111122, 0x0a0a0a, 0.2)
+    // Hemisphere for sky/ground color
+    const hemi = new THREE.HemisphereLight(0x334455, 0x2a2a2a, 0.58)
     this.scene.add(hemi)
   }
 
   private setupInput() {
     document.addEventListener('keydown', (e) => {
+      if (e.ctrlKey || e.metaKey) e.preventDefault()
       this.keys.add(e.code)
 
       // Interaction keys
       if (e.code === 'KeyE') this.handleInteractPress()
       if (e.code === 'Space') this.handleSpacePress()
       if (e.code === 'KeyQ') this.handleQPress()
-      if (e.code === 'KeyR') this.handleRPress()
+      if (e.code === 'KeyR' && !e.repeat) this.handleRPress()
     })
 
     document.addEventListener('keyup', (e) => {
       this.keys.delete(e.code)
 
       if (e.code === 'KeyE') this.handleInteractRelease()
+      if (e.code === 'KeyR') this.network.sendStopInteract()
     })
 
     // Mouse for camera control
@@ -252,15 +262,6 @@ export class GameEngine {
       this.network.sendInteract('vault', this.nearbyInteractable.id)
     }
 
-    // Self-unhook
-    if (me.action_state === 'hooked') {
-      this.network.sendInteract('self_unhook')
-    }
-
-    // Escape trap
-    if (me.action_state === 'trapped') {
-      this.network.sendInteract('escape_trap')
-    }
   }
 
   private handleQPress() {
@@ -326,7 +327,7 @@ export class GameEngine {
   private updateCamera(dt: number) {
     const sensitivity = 0.002
 
-    this.cameraYaw -= this.mouseDeltaX * sensitivity
+    this.cameraYaw += this.mouseDeltaX * sensitivity
     this.cameraPitch -= this.mouseDeltaY * sensitivity
     this.cameraPitch = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, this.cameraPitch))
 
@@ -338,9 +339,26 @@ export class GameEngine {
 
     const myModel = this.playerModels.get(me.user_id)
 
+    // Lerp smooth display position toward server (source of truth) for extremely smooth POV
+    const serverPos = { x: me.pos_x, y: me.pos_y, z: me.pos_z, rotY: me.rot_y }
+    if (!this.smoothDisplayPos) {
+      this.smoothDisplayPos = { ...serverPos }
+    } else {
+      const tPos = 1 - Math.exp(-GameEngine.SMOOTH_POS_K * dt)
+      const tRot = 1 - Math.exp(-GameEngine.SMOOTH_ROT_K * dt)
+      this.smoothDisplayPos.x += (serverPos.x - this.smoothDisplayPos.x) * tPos
+      this.smoothDisplayPos.y += (serverPos.y - this.smoothDisplayPos.y) * tPos
+      this.smoothDisplayPos.z += (serverPos.z - this.smoothDisplayPos.z) * tPos
+      let rotDiff = serverPos.rotY - this.smoothDisplayPos.rotY
+      while (rotDiff > Math.PI) rotDiff -= 2 * Math.PI
+      while (rotDiff < -Math.PI) rotDiff += 2 * Math.PI
+      this.smoothDisplayPos.rotY += rotDiff * tRot
+    }
+    const pos = this.smoothDisplayPos
+
     if (me.role === 'killer') {
-      // First person camera
-      this.camera.position.set(me.pos_x, me.pos_y + 1.7, me.pos_z)
+      // First person camera (smooth position, server is source of truth)
+      this.camera.position.set(pos.x, pos.y + 1.7, pos.z)
 
       const lookDir = new THREE.Vector3(
         Math.sin(this.cameraYaw) * Math.cos(this.cameraPitch),
@@ -356,17 +374,43 @@ export class GameEngine {
       // Hide own model in first person
       if (myModel) myModel.visible = false
     } else {
-      // Third person camera
-      const playerPos = new THREE.Vector3(me.pos_x, me.pos_y, me.pos_z)
-
+      // Third person camera: reduced distance, and collision so camera doesn't go through walls
+      const playerPos = new THREE.Vector3(pos.x, pos.y, pos.z)
+      const lookAtY = 1.2
+      const horizDist = 2.4
+      const vertBase = 2.0
+      const vertSwing = 1.2
       const offset = new THREE.Vector3(
-        -Math.sin(this.cameraYaw) * 3.5,
-        2.5 + Math.sin(this.cameraPitch) * 1.5,
-        -Math.cos(this.cameraYaw) * 3.5
+        -Math.sin(this.cameraYaw) * horizDist,
+        vertBase + Math.sin(this.cameraPitch) * vertSwing,
+        -Math.cos(this.cameraYaw) * horizDist
       )
-
-      this.camera.position.copy(playerPos).add(offset)
-      this.camera.lookAt(playerPos.x, playerPos.y + 1.2, playerPos.z)
+      const desiredCamPos = playerPos.clone().add(offset)
+      this.cameraRayOrigin.set(playerPos.x, playerPos.y + lookAtY, playerPos.z)
+      this.cameraRayDir.copy(desiredCamPos).sub(this.cameraRayOrigin).normalize()
+      const maxCamDist = this.cameraRayOrigin.distanceTo(desiredCamPos)
+      this.cameraRaycaster.set(this.cameraRayOrigin, this.cameraRayDir)
+      this.cameraRaycaster.camera = this.camera
+      this.cameraRaycaster.far = maxCamDist + 0.5
+      const playerRoots = new Set(this.playerModels.values())
+      const hits = this.cameraRaycaster.intersectObject(this.scene, true)
+      let useDist = maxCamDist
+      const minHitY = playerPos.y + 0.3
+      for (const hit of hits) {
+        if (hit.object instanceof THREE.Sprite) continue
+        if (hit.point.y < minHitY) continue
+        let obj: THREE.Object3D | null = hit.object
+        while (obj) {
+          if (playerRoots.has(obj as THREE.Group)) break
+          obj = obj.parent
+        }
+        if (obj) continue
+        const d = hit.distance
+        if (d < useDist) useDist = Math.max(0.2, d - 0.1)
+        break
+      }
+      this.camera.position.copy(this.cameraRayOrigin).addScaledVector(this.cameraRayDir, useDist)
+      this.camera.lookAt(playerPos.x, playerPos.y + lookAtY, playerPos.z)
 
       // Show own model
       if (myModel) myModel.visible = true
@@ -389,8 +433,8 @@ export class GameEngine {
 
     if (this.keys.has('KeyW')) { dx += forward.x; dz += forward.z }
     if (this.keys.has('KeyS')) { dx -= forward.x; dz -= forward.z }
-    if (this.keys.has('KeyA')) { dx -= right.x; dz -= right.z }
-    if (this.keys.has('KeyD')) { dx += right.x; dz += right.z }
+    if (this.keys.has('KeyA')) { dx += right.x; dz += right.z }
+    if (this.keys.has('KeyD')) { dx -= right.x; dz -= right.z }
 
     // Normalize
     const len = Math.sqrt(dx * dx + dz * dz)
@@ -402,34 +446,33 @@ export class GameEngine {
         if (this.keys.has('ControlLeft') || this.keys.has('ControlRight')) {
           moveState = 'crouching'
         } else if (this.keys.has('ShiftLeft') || this.keys.has('ShiftRight')) {
-          moveState = 'walking'
-        } else {
           moveState = 'running'
+        } else {
+          moveState = 'walking'
         }
       } else {
         moveState = 'running' // Killer always runs
       }
 
-      // Calculate speed
-      let speed = 4.0 // default
+      // Calculate speed (must match game-server/internal/player/player.go) — 3x multiplier, then 1.5x
+      let speed = 63.0 // default run
       if (me.role === 'survivor') {
-        if (moveState === 'running') speed = 4.0
-        else if (moveState === 'walking') speed = 2.26
-        else if (moveState === 'crouching') speed = 1.13
+        if (moveState === 'running') speed = 63.0
+        else if (moveState === 'walking') speed = 36.0
+        else if (moveState === 'crouching') speed = 18.0
       } else {
-        speed = me.carrying_id > 0 ? 4.23 : 4.6
+        speed = me.carrying_id > 0 ? 66.24 : 72.0
       }
 
       const newX = me.pos_x + dx * speed * dt
       const newZ = me.pos_z + dz * speed * dt
 
-      // Send to server at tick rate
-      if (now - this.lastSendTime > 1000 / 30) {
+      // Send to server at tick rate (45 Hz for smoother input)
+      if (now - this.lastSendTime > 1000 / 45) {
         this.network.sendMove(newX, me.pos_y, newZ, this.cameraYaw, moveState)
         this.lastSendTime = now
       }
     } else {
-      // Idle
       if (now - this.lastSendTime > 200) {
         this.network.sendMove(me.pos_x, me.pos_y, me.pos_z, this.cameraYaw, 'idle')
         this.lastSendTime = now
@@ -511,18 +554,40 @@ export class GameEngine {
       model.add(labelSprite)
     }
 
-    // Update position with interpolation
-    const lerpFactor = 0.3
-    model.position.x += (p.pos_x - model.position.x) * lerpFactor
-    model.position.y += (p.pos_y - model.position.y) * lerpFactor
-    model.position.z += (p.pos_z - model.position.z) * lerpFactor
+    // Feet offset: model origin is at waist; bottom of feet ~0.24 (survivor) / 0.2 (killer)
+    const feetOffset = p.role === 'killer' ? 0.2 : 0.24
+    const dyingFloorOffset = p.action_state === 'dying' ? 0.2 : 0
 
-    // Update rotation
-    model.rotation.y = p.rot_y
+    // Local player: use smooth display position (lerped toward server in updateCamera); remote: use server position
+    const isLocal = p.user_id === this.authStore.userId
+    const displayX = isLocal && this.smoothDisplayPos ? this.smoothDisplayPos.x : p.pos_x
+    const displayY = isLocal && this.smoothDisplayPos ? this.smoothDisplayPos.y : p.pos_y
+    const displayZ = isLocal && this.smoothDisplayPos ? this.smoothDisplayPos.z : p.pos_z
+    let displayRotY = isLocal && this.smoothDisplayPos ? this.smoothDisplayPos.rotY : p.rot_y
+    const displayYFeet = displayY - feetOffset + dyingFloorOffset
+
+    // When repairing, face the generator (client-side display; server also sets RotY in handleRepair)
+    if (p.action_state === 'repairing' && p.action_target) {
+      const state = this.gameStore.gameState
+      const gen = state?.generators.find((g) => g.id === p.action_target)
+      if (gen) {
+        displayRotY = Math.atan2(gen.pos_x - displayX, gen.pos_z - displayZ)
+      }
+    }
+
+    const lerpFactor = 1 - Math.exp(-GameEngine.SMOOTH_POS_K * dt)
+    model.position.x += (displayX - model.position.x) * lerpFactor
+    model.position.y += (displayYFeet - model.position.y) * lerpFactor
+    model.position.z += (displayZ - model.position.z) * lerpFactor
+    let angleDiff = displayRotY - model.rotation.y
+    while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI
+    while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI
+    model.rotation.y += angleDiff * lerpFactor
 
     // Update animation
     if (animator) {
-      animator.update(dt, p.move_state, p.action_state, p.role === 'killer')
+      const isInjured = p.role === 'survivor' && p.health === 2
+      animator.update(dt, p.move_state, p.action_state, p.role === 'killer', isInjured)
     }
 
     // Death / escape visibility
@@ -575,6 +640,16 @@ export class GameEngine {
       light.position.set(0, 1.2, 0)
       light.name = 'genLight'
       mesh.add(light)
+
+      // World-space progress bar (track + fill)
+      const track = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.06, 0.04), Materials.metalDark)
+      track.position.set(0, 1.35, 0.4)
+      track.name = 'progressTrack'
+      mesh.add(track)
+      const fill = new THREE.Mesh(new THREE.BoxGeometry(0.76, 0.05, 0.02), Materials.genRed)
+      fill.position.set(-0.38, 0, 0)
+      fill.name = 'progressFill'
+      track.add(fill)
     }
 
     // Update indicator color
@@ -606,6 +681,30 @@ export class GameEngine {
         }
       })
     }
+
+    // Progress bar visibility and fill (scale fill in X by progress; center so it grows rightward)
+    const track = mesh.getObjectByName('progressTrack')
+    const fill = mesh.getObjectByName('progressFill')
+    if (track && fill) {
+      if (gen.being_repaired && !gen.done) {
+        track.visible = true
+        fill.visible = true
+        const p = Math.max(0, Math.min(1, gen.progress ?? 0))
+        fill.scale.x = p
+        fill.position.x = -0.38 + p * 0.38
+      } else if (gen.done) {
+        track.visible = true
+        fill.visible = true
+        fill.scale.x = 1
+        fill.position.x = 0
+        if (fill instanceof THREE.Mesh && fill.material) {
+          (fill.material as THREE.MeshLambertMaterial).color?.setHex(0x22aa22)
+        }
+      } else {
+        track.visible = false
+        fill.visible = false
+      }
+    }
   }
 
   private updatePallet(pal: any) {
@@ -620,10 +719,16 @@ export class GameEngine {
 
     if (pal.broken) {
       mesh.visible = false
-    } else if (pal.dropped) {
-      // Rotate pallet 90 degrees to lie flat
-      mesh.rotation.x = Math.PI / 2
-      mesh.position.y = 0.15
+    } else {
+      mesh.visible = true
+      mesh.rotation.y = pal.rot_y
+      if (pal.dropped) {
+        mesh.rotation.x = Math.PI / 2
+        mesh.position.set(pal.pos_x, 0.15, pal.pos_z)
+      } else {
+        mesh.rotation.x = 0
+        mesh.position.set(pal.pos_x, pal.pos_y, pal.pos_z)
+      }
     }
   }
 
@@ -635,9 +740,9 @@ export class GameEngine {
       this.hookMeshes.set(hook.id, mesh)
       this.scene.add(mesh)
 
-      // Hook light
+      // Hook light (matches smaller hook model height)
       const light = new THREE.PointLight(0xaa2222, 0.5, 6)
-      light.position.set(0, 3.5, 0)
+      light.position.set(0, 2.4, 0)
       mesh.add(light)
     }
 
@@ -766,7 +871,7 @@ export class GameEngine {
       return
     }
 
-    const interactDist = 2.5
+    const interactDist = 1.6
     this.nearbyInteractable = null
 
     if (me.role === 'survivor') {
@@ -781,7 +886,7 @@ export class GameEngine {
       // Check gates
       if (state.gates_powered) {
         for (const gate of state.gates) {
-          if (!gate.open && gate.powered && this.dist2d(me, gate) < interactDist + 1) {
+          if (!gate.open && gate.powered && this.dist2d(me, gate) < interactDist + 0.6) {
             this.nearbyInteractable = { type: 'gate', id: gate.id, name: 'Open Gate [E]' }
             return
           }
@@ -827,9 +932,9 @@ export class GameEngine {
       }
     } else {
       // Killer interactions
-      // Pickup dying survivor
+      // Pickup dying survivor (not hooked)
       for (const p of state.players) {
-        if (p.role === 'survivor' && p.health === 1 && p.is_alive && p.action_state !== 'being_carried') {
+        if (p.role === 'survivor' && p.health === 1 && p.is_alive && p.action_state !== 'being_carried' && p.action_state !== 'hooked') {
           if (this.dist2dP(me, p) < interactDist) {
             this.nearbyInteractable = { type: 'survivor_dying', id: p.user_id.toString(), name: `Pickup ${p.username} [E]` }
             return
@@ -907,6 +1012,7 @@ export class GameEngine {
 
   destroy() {
     this.running = false
+    this.smoothDisplayPos = null
     this.network.disconnect()
 
     // Clean up Three.js

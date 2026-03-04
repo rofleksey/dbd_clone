@@ -12,6 +12,7 @@ export interface PlayerState {
   health: number
   move_state: string
   action_state: string
+  action_target: string
   action_progress: number
   carrying_id: number
   hooked_on: string

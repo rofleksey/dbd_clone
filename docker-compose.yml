@@ -8,12 +8,21 @@ services:
     ports:
       - "5433:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - dbd-db-data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U dbd -d dbd_clone"]
       interval: 5s
       timeout: 5s
       retries: 5
+
+  # Builds image for master-server to spawn game instances; container exits immediately
+  game-server:
+    build:
+      context: ./game-server
+      dockerfile: Dockerfile
+    image: dbd-game-server:latest
+    command: ["true"]
+    restart: "no"
 
   master-server:
     build:
@@ -34,6 +43,8 @@ services:
     volumes:
       - //var/run/docker.sock:/var/run/docker.sock
     depends_on:
+      game-server:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
 
@@ -55,5 +66,5 @@ services:
       - frontend
 
 volumes:
-  pgdata:
-  gamelogs:
+  dbd-db-data:
+  dbd-logs-data:

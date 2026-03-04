@@ -33,7 +33,7 @@ export class CharacterAnimator {
     return this.originalPositions.get(name) || new THREE.Vector3()
   }
 
-  update(dt: number, moveState: string, actionState: string, isKiller: boolean) {
+  update(dt: number, moveState: string, actionState: string, isKiller: boolean, isInjured: boolean = false) {
     this.time += dt
 
     switch (actionState) {
@@ -52,6 +52,9 @@ export class CharacterAnimator {
         return
       case 'being_carried':
         this.animateBeingCarried()
+        return
+      case 'dying':
+        this.animateDowned()
         return
       case 'trapped':
         this.animateTrapped()
@@ -73,10 +76,12 @@ export class CharacterAnimator {
 
     switch (moveState) {
       case 'running':
-        this.animateRun(isKiller ? 5.0 : 6.0)
+        if (isInjured) this.animateInjuredRun()
+        else this.animateRun(isKiller ? 5.0 : 6.0)
         break
       case 'walking':
-        this.animateWalk()
+        if (isInjured) this.animateInjuredWalk()
+        else this.animateWalk()
         break
       case 'crouching':
         this.animateCrouch()
@@ -108,6 +113,40 @@ export class CharacterAnimator {
     this.animateBodyBob(t, 0.02)
   }
 
+  private animateInjuredWalk() {
+    const speed = 2.2
+    const swing = 0.25
+    const t = this.time * speed
+    const limp = Math.sin(t * 2) * 0.04
+
+    this.animateLegSwing(t, swing)
+    this.animateArmSwing(t, swing * 0.5)
+    this.animateBodyBob(t, 0.03)
+    const torso = this.getPart('torso')
+    if (torso) {
+      const orig = this.getOrigPos('torso')
+      torso.position.x = orig.x + limp
+      torso.position.y = orig.y - 0.05
+    }
+  }
+
+  private animateInjuredRun() {
+    const speed = 4.0
+    const swing = 0.35
+    const t = this.time * speed
+    const limp = Math.sin(t * 2) * 0.06
+
+    this.animateLegSwing(t, swing)
+    this.animateArmSwing(t, swing * 0.6)
+    this.animateBodyBob(t, 0.05)
+    const torso = this.getPart('torso')
+    if (torso) {
+      const orig = this.getOrigPos('torso')
+      torso.position.x = orig.x + limp
+      torso.position.y = orig.y - 0.08
+    }
+  }
+
   private animateRun(speed: number) {
     const swing = 0.5
     const t = this.time * speed
@@ -118,22 +157,32 @@ export class CharacterAnimator {
   }
 
   private animateCrouch() {
-    const speed = 2.0
-    const swing = 0.15
+    const speed = 1.8
+    const swing = 0.08
     const t = this.time * speed
 
-    // Lower the body
+    // Lower the body more for a compact crouch
     this.model.traverse((child) => {
       if (child !== this.model && child.name) {
         const orig = this.getOrigPos(child.name)
         if (orig) {
-          child.position.y = orig.y - 0.3
+          child.position.y = orig.y - 0.48
         }
       }
     })
 
+    // Arms slightly forward, legs tucked
+    const armLU = this.getPart('armLU')
+    const armRU = this.getPart('armRU')
+    if (armLU) {
+      const o = this.getOrigPos('armLU')
+      armLU.position.set(o.x - 0.05, o.y - 0.1, o.z + 0.12)
+    }
+    if (armRU) {
+      const o = this.getOrigPos('armRU')
+      armRU.position.set(o.x + 0.05, o.y - 0.1, o.z + 0.12)
+    }
     this.animateLegSwing(t, swing)
-    this.animateArmSwing(t, swing * 0.4)
   }
 
   private animateAttack() {
@@ -258,6 +307,81 @@ export class CharacterAnimator {
     // Limp body draped over shoulder - rotate model
     this.model.rotation.x = Math.PI / 6
     this.model.rotation.z = Math.sin(this.time * 2) * 0.05
+  }
+
+  private animateDowned() {
+    // Crawl / downed pose: body low, arms forward, legs bent, subtle struggle motion
+    const t = this.time * 2
+    const struggle = Math.sin(t) * 0.02
+
+    this.resetLimbs()
+
+    // Tilt model forward into crawl (on hands and knees)
+    this.model.rotation.x = Math.PI / 2.2
+    this.model.rotation.z = struggle
+
+    const torso = this.getPart('torso')
+    const head = this.getPart('head')
+    const armLU = this.getPart('armLU')
+    const armLL = this.getPart('armLL')
+    const armRU = this.getPart('armRU')
+    const armRL = this.getPart('armRL')
+    const legLU = this.getPart('legLU')
+    const legLL = this.getPart('legLL')
+    const legRU = this.getPart('legRU')
+    const legRL = this.getPart('legRL')
+
+    // Lower torso and head slightly (in local space after tilt)
+    if (torso) {
+      const orig = this.getOrigPos('torso')
+      torso.position.y = orig.y - 0.15 + struggle
+    }
+    if (head) {
+      const orig = this.getOrigPos('head')
+      head.position.y = orig.y - 0.1
+    }
+
+    // Arms forward (crawling)
+    if (armLU) {
+      const orig = this.getOrigPos('armLU')
+      armLU.position.z = orig.z + 0.25
+      armLU.position.y = orig.y - 0.2
+    }
+    if (armLL) {
+      const orig = this.getOrigPos('armLL')
+      armLL.position.z = orig.z + 0.3
+      armLL.position.y = orig.y - 0.25
+    }
+    if (armRU) {
+      const orig = this.getOrigPos('armRU')
+      armRU.position.z = orig.z + 0.25 - struggle
+      armRU.position.y = orig.y - 0.2
+    }
+    if (armRL) {
+      const orig = this.getOrigPos('armRL')
+      armRL.position.z = orig.z + 0.3 + struggle
+      armRL.position.y = orig.y - 0.25
+    }
+
+    // Legs bent (knees up)
+    if (legLU) {
+      const orig = this.getOrigPos('legLU')
+      legLU.position.y = orig.y - 0.1
+      legLU.position.z = orig.z - 0.15
+    }
+    if (legLL) {
+      const orig = this.getOrigPos('legLL')
+      legLL.position.z = orig.z - 0.2
+    }
+    if (legRU) {
+      const orig = this.getOrigPos('legRU')
+      legRU.position.y = orig.y - 0.1
+      legRU.position.z = orig.z - 0.15
+    }
+    if (legRL) {
+      const orig = this.getOrigPos('legRL')
+      legRL.position.z = orig.z - 0.2
+    }
   }
 
   private animateTrapped() {

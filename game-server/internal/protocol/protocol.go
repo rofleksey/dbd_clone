@@ -49,7 +49,8 @@ type PlayerState struct {
 	RotY           float64 `json:"rot_y"`
 	Health         int     `json:"health"`                    // 0=dead/sacrificed, 1=dying, 2=injured, 3=healthy
 	MoveState      string  `json:"move_state"`                // idle, walking, running, crouching
-	ActionState    string  `json:"action_state"`              // none, repairing, healing, unhooking, opening_gate, carrying, being_carried, hooked, trapped, stunned, attacking
+	ActionState    string  `json:"action_state"`              // none, repairing, healing, unhooking, opening_gate, carrying, being_carried, hooked, dying, trapped, stunned, attacking
+	ActionTarget   string  `json:"action_target,omitempty"`
 	ActionProgress float64 `json:"action_progress,omitempty"` // 0-1
 	CarryingID     int     `json:"carrying_id,omitempty"`
 	HookedOn       string  `json:"hooked_on,omitempty"`

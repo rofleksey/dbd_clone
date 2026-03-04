@@ -258,6 +258,11 @@ func (r *Router) startGame(l *lobby.Lobby) {
 		return
 	}
 
+	// Persist port so /ws/game/{id} can reach the game server
+	if err := db.UpdateGamePortAndContainer(game.ID, port, containerID); err != nil {
+		log.Printf("failed to update game port in DB: %v", err)
+	}
+
 	log.Printf("Game %d started on port %d, container %s", game.ID, port, containerID[:12])
 
 	// Build player info for game start message

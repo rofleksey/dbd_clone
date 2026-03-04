@@ -126,6 +126,14 @@ func CreateGame(killerID int, containerID string, port int) (*models.Game, error
 	return game, nil
 }
 
+func UpdateGamePortAndContainer(gameID int, port int, containerID string) error {
+	_, err := DB.Exec(
+		"UPDATE games SET port = $1, container_id = $2 WHERE id = $3",
+		port, containerID, gameID,
+	)
+	return err
+}
+
 func AddGamePlayer(gameID, userID int, role string) error {
 	_, err := DB.Exec(
 		"INSERT INTO game_players (game_id, user_id, role) VALUES ($1, $2, $3)",
